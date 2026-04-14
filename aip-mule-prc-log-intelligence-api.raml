@@ -31,6 +31,7 @@ types:
     description: Current lifecycle state for analysis job orchestration.
     enum: [ accepted, collecting, queued, running, completed, failed, cancelled ]
   LogFilter:
+    description: Collection filters applied before orchestration dispatch.
     type: object
     additionalProperties: false
     properties:
@@ -57,8 +58,8 @@ types:
         minimum: 1
         maximum: 1000
         description: Upper bound for canonical entries retrieved before dispatch.
-  AnalysisJobRequest:
-    description: Request payload to orchestrate collection and dispatch analysis.
+  AnalysisJobSubmissionInput:
+    description: Input payload to orchestrate collection and dispatch analysis.
     type: object
     additionalProperties: false
     properties:
@@ -72,12 +73,14 @@ types:
         description: System API sources to query for this run.
       filter:
         type: LogFilter
+        description: Bounded query filters used during source log collection.
       requestedBy:
         type: string
         description: Caller identifier used for audit and ownership.
       priority?:
         type: Priority
         default: normal
+        description: Requested orchestration priority used for control-plane dispatch.
       tenantId?:
         type: string
         description: Optional tenant context for routing and policy.
@@ -88,27 +91,38 @@ types:
     properties:
       logId:
         type: string
+        description: Canonical identifier for the collected log entry.
       timestamp:
         type: datetime
+        description: ISO8601 UTC timestamp when the log event occurred.
       sourceSystem:
         type: SourceSystem
+        description: Source system that originated this canonical log record.
       serviceName:
         type: string
+        description: Application or service name associated with the event.
       environment:
         type: string
+        description: Runtime environment where the event was emitted.
       severity:
         type: string
+        description: Canonical severity value normalised by the process flow.
       message:
         type: string
+        description: Sanitised log message after redaction policy application.
       correlationId:
         type: string
+        description: Correlation identifier propagated from source or request context.
       dataClass:
         type: string
+        description: Data classification assigned after policy evaluation.
         enum: [ public, internal, confidential, restricted ]
       redactionApplied:
         type: boolean
+        description: Indicates if sensitive fragments were masked during normalisation.
       attributes?:
         type: object
+        description: Optional safe metadata retained after canonical mapping.
         additionalProperties: false
   OrchestrationSummary:
     description: Summary of source collection and dispatch outcome.
@@ -118,72 +132,98 @@ types:
       collectedCount:
         type: integer
         minimum: 0
+        description: Total number of canonical entries collected across selected sources.
       partialResults:
         type: boolean
+        description: True when one or more source collections failed but orchestration continued.
       sourceStatuses:
         type: object[]
+        description: Per-source orchestration status with retry outcomes.
         items:
+          description: Collection outcome for a single source system.
           type: object
           additionalProperties: false
           properties:
             sourceSystem:
               type: SourceSystem
+              description: Source system that was processed.
             status:
               type: string
               enum: [ success, failed, skipped ]
+              description: Final source outcome for this orchestration run.
             retryCount:
               type: integer
               minimum: 0
+              description: Number of retries used before final source outcome.
             note?:
               type: string
+              description: Optional diagnostic note for failed or skipped source processing.
       dispatchEventName:
         type: string
+        description: Event name published to control-plane dispatch integration.
       dispatchRetryCount:
         type: integer
         minimum: 0
-  AnalysisJobResponse:
-    description: Process API accepted response with orchestration metadata.
+        description: Number of retries used for control-plane dispatch delivery.
+  AnalysisJobAcceptedOutput:
+    description: Accepted output payload with orchestration metadata.
     type: object
     additionalProperties: false
     properties:
       requestId:
         type: string
+        description: Unique Process API request identifier.
       correlationId:
         type: string
+        description: Correlation identifier propagated across orchestration integrations.
       idempotencyKey:
         type: string
+        description: Effective idempotency key used for deduplication.
       jobId:
         type: string
+        description: Analysis job identifier assigned for downstream processing.
       status:
         type: JobStatus
+        description: Current accepted lifecycle status after dispatch.
       submittedAt:
         type: datetime
+        description: ISO8601 UTC timestamp when orchestration accepted the job.
       orchestration:
         type: OrchestrationSummary
-  AnalysisJobStatusResponse:
-    description: Current orchestration and control-plane status for a job.
+        description: Source collection and dispatch summary for this job.
+  AnalysisJobStatusOutput:
+    description: Current orchestration and control-plane status output for a job.
     type: object
     additionalProperties: false
     properties:
       requestId:
         type: string
+        description: Unique Process API request identifier.
       correlationId:
         type: string
+        description: Correlation identifier for end-to-end tracing.
       jobId:
         type: string
+        description: Analysis job identifier provided in the request URI.
       status:
         type: JobStatus
+        description: Current control-plane or process orchestration lifecycle status.
       resultUri?:
         type: string
         description: Optional URI to completed analysis output.
       updatedAt:
         type: datetime
+        example: "2026-04-14T10:34:50Z"
+        description: ISO8601 UTC timestamp for the latest known job state update.
       retryable:
         type: boolean
+        description: Indicates whether the current failed status is eligible for retry.
       failureCode?:
         type: string
+        description: Optional canonical failure code when status is failed.
       failureReason?:
         type: string
+        description: Optional safe diagnostic failure reason.
 
 /analysis-jobs:
   post:
@@ -201,7 +241,7 @@ types:
         description: Optional override for payload `idempotencyKey` to support client retries.
     body:
       application/json:
-        type: AnalysisJobRequest
+        type: AnalysisJobSubmissionInput
         example: !include examples/post-analysis-job-request.raml
     responses:
       202:
@@ -218,12 +258,12 @@ types:
             description: Correlation identifier propagated by process flow.
         body:
           application/json:
-            type: AnalysisJobResponse
+            type: AnalysisJobAcceptedOutput
             example: !include examples/post-analysis-job-response-202.raml
 
-/analysis-jobs/{jobId}:
+/analysis-jobs/{jobid}:
   uriParameters:
-    jobId:
+    jobid:
       type: string
       description: Control-plane analysis job identifier.
   get:
@@ -249,7 +289,7 @@ types:
             description: Correlation identifier used by process flow.
         body:
           application/json:
-            type: AnalysisJobStatusResponse
+            type: AnalysisJobStatusOutput
             example: !include examples/get-analysis-job-response-200.raml
 
 /health-check:

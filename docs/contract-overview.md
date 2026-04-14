@@ -23,7 +23,7 @@ Primary orchestration sequence:
 
 Status retrieval:
 
-- `GET /analysis-jobs/{jobId}` returns current lifecycle state and optional result URI.
+- `GET /analysis-jobs/{jobid}` returns current lifecycle state and optional result URI.
 
 ## Canonical Payload Model
 
