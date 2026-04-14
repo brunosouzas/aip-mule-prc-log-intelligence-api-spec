@@ -30,6 +30,10 @@ types:
     type: string
     description: Current lifecycle state for analysis job orchestration.
     enum: [ accepted, collecting, queued, running, completed, failed, cancelled ]
+  Iso8601Timestamp:
+    type: string
+    description: Timestamp encoded in ISO8601 using UTC Z or explicit offset.
+    pattern: ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+\-]\d{2}:\d{2})$
   LogFilter:
     description: Collection filters applied before orchestration dispatch.
     type: object
@@ -212,7 +216,7 @@ types:
         type: string
         description: Optional URI to completed analysis output.
       updatedAt:
-        type: datetime
+        type: Iso8601Timestamp
         example: "2026-04-14T10:34:50Z"
         description: ISO8601 UTC timestamp for the latest known job state update.
       retryable:
