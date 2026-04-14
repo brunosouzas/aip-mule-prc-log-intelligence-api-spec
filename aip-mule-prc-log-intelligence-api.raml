@@ -1,0 +1,259 @@
+#%RAML 1.0
+title: AIP Mule Process Log Intelligence API
+version: v1
+baseUri: /api/v1
+mediaType: application/json
+protocols: [ HTTPS ]
+documentation:
+  - !include documentation.raml
+
+uses:
+  core-lib: exchange_modules/f29c19f9-a3b0-4a09-8da3-92b76caaac43/mule-utility-common-fragment/1.0.0/mule-utility-common-fragment.raml
+
+securedBy:
+  - core-lib.token
+
+description: |
+  Draft canonical Process API contract to orchestrate log collection from System APIs
+  and dispatch log analysis jobs to the AI control-plane.
+
+types:
+  SourceSystem:
+    type: string
+    description: Supported log source systems abstracted behind System APIs.
+    enum: [ anypoint, observability ]
+  Priority:
+    type: string
+    description: Analysis job dispatch priority.
+    enum: [ low, normal, high, urgent ]
+  JobStatus:
+    type: string
+    description: Current lifecycle state for analysis job orchestration.
+    enum: [ accepted, collecting, queued, running, completed, failed, cancelled ]
+  LogFilter:
+    type: object
+    additionalProperties: false
+    properties:
+      startTime:
+        type: datetime
+        description: Inclusive UTC start timestamp for collection window.
+      endTime:
+        type: datetime
+        description: Exclusive UTC end timestamp for collection window.
+      environment?:
+        type: string
+        description: Optional runtime environment filter.
+      severity?:
+        type: string[]
+        description: Optional severity filter list.
+      containsText?:
+        type: string
+        description: Optional case-insensitive message filter.
+      correlationId?:
+        type: string
+        description: Optional source-side correlation filter.
+      limit?:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        description: Upper bound for canonical entries retrieved before dispatch.
+  AnalysisJobRequest:
+    description: Request payload to orchestrate collection and dispatch analysis.
+    type: object
+    additionalProperties: false
+    properties:
+      idempotencyKey:
+        type: string
+        description: Client-provided key to avoid duplicate dispatch on retries.
+      sourceSystems:
+        type: SourceSystem[]
+        minItems: 1
+        uniqueItems: true
+        description: System API sources to query for this run.
+      filter:
+        type: LogFilter
+      requestedBy:
+        type: string
+        description: Caller identifier used for audit and ownership.
+      priority?:
+        type: Priority
+        default: normal
+      tenantId?:
+        type: string
+        description: Optional tenant context for routing and policy.
+  CanonicalLogEntry:
+    description: Canonical process-layer log record sent to control-plane analysis.
+    type: object
+    additionalProperties: false
+    properties:
+      logId:
+        type: string
+      timestamp:
+        type: datetime
+      sourceSystem:
+        type: SourceSystem
+      serviceName:
+        type: string
+      environment:
+        type: string
+      severity:
+        type: string
+      message:
+        type: string
+      correlationId:
+        type: string
+      dataClass:
+        type: string
+        enum: [ public, internal, confidential, restricted ]
+      redactionApplied:
+        type: boolean
+      attributes?:
+        type: object
+        additionalProperties: false
+  OrchestrationSummary:
+    description: Summary of source collection and dispatch outcome.
+    type: object
+    additionalProperties: false
+    properties:
+      collectedCount:
+        type: integer
+        minimum: 0
+      partialResults:
+        type: boolean
+      sourceStatuses:
+        type: object[]
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            sourceSystem:
+              type: SourceSystem
+            status:
+              type: string
+              enum: [ success, failed, skipped ]
+            retryCount:
+              type: integer
+              minimum: 0
+            note?:
+              type: string
+      dispatchEventName:
+        type: string
+      dispatchRetryCount:
+        type: integer
+        minimum: 0
+  AnalysisJobResponse:
+    description: Process API accepted response with orchestration metadata.
+    type: object
+    additionalProperties: false
+    properties:
+      requestId:
+        type: string
+      correlationId:
+        type: string
+      idempotencyKey:
+        type: string
+      jobId:
+        type: string
+      status:
+        type: JobStatus
+      submittedAt:
+        type: datetime
+      orchestration:
+        type: OrchestrationSummary
+  AnalysisJobStatusResponse:
+    description: Current orchestration and control-plane status for a job.
+    type: object
+    additionalProperties: false
+    properties:
+      requestId:
+        type: string
+      correlationId:
+        type: string
+      jobId:
+        type: string
+      status:
+        type: JobStatus
+      resultUri?:
+        type: string
+        description: Optional URI to completed analysis output.
+      updatedAt:
+        type: datetime
+      retryable:
+        type: boolean
+      failureCode?:
+        type: string
+      failureReason?:
+        type: string
+
+/analysis-jobs:
+  post:
+    displayName: Create Analysis Job
+    description: |
+      Collect canonical logs from selected System APIs, normalise payloads, and dispatch
+      an analysis request to the control plane with explicit idempotency guarantees.
+    is: [ core-lib.errorResponse, core-lib.trackable ]
+    headers:
+      X-Correlation-Id?:
+        type: string
+        description: Optional correlation identifier propagated across all integration hops.
+      Idempotency-Key?:
+        type: string
+        description: Optional override for payload `idempotencyKey` to support client retries.
+    body:
+      application/json:
+        type: AnalysisJobRequest
+        example: !include examples/post-analysis-job-request.raml
+    responses:
+      202:
+        description: Request accepted and orchestration dispatched.
+        headers:
+          Content-Type:
+            required: false
+            enum: [ application/json ]
+            default: application/json
+            description: content-type default to use
+          X-Correlation-Id:
+            type: string
+            required: true
+            description: Correlation identifier propagated by process flow.
+        body:
+          application/json:
+            type: AnalysisJobResponse
+            example: !include examples/post-analysis-job-response-202.raml
+
+/analysis-jobs/{jobId}:
+  uriParameters:
+    jobId:
+      type: string
+      description: Control-plane analysis job identifier.
+  get:
+    displayName: Get Analysis Job Status
+    description: Retrieve current process/control-plane status for an analysis job.
+    is: [ core-lib.errorResponse, core-lib.trackable ]
+    headers:
+      X-Correlation-Id?:
+        type: string
+        description: Optional correlation identifier for traceability.
+    responses:
+      200:
+        description: Current job status retrieved.
+        headers:
+          Content-Type:
+            required: false
+            enum: [ application/json ]
+            default: application/json
+            description: content-type default to use
+          X-Correlation-Id:
+            type: string
+            required: true
+            description: Correlation identifier used by process flow.
+        body:
+          application/json:
+            type: AnalysisJobStatusResponse
+            example: !include examples/get-analysis-job-response-200.raml
+
+/health-check:
+  /alive:
+    type: core-lib.healthCheckAlive
+  /ready:
+    type: core-lib.healthCheckReady
